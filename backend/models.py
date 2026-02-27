@@ -2,7 +2,7 @@
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Text, DateTime,
-    ForeignKey, Boolean, Float, JSON
+    ForeignKey, Boolean, Float, JSON, LargeBinary
 )
 from sqlalchemy.orm import relationship
 from database import Base
@@ -90,3 +90,28 @@ class UploadedDocument(Base):
     content     = Column(Text, nullable=True)       # extracted text
     summary     = Column(Text, nullable=True)       # AI-generated summary
     created_at  = Column(DateTime, default=datetime.utcnow)
+
+
+class PaperEmbedding(Base):
+    """Stores vector embeddings for papers (sentence-transformer)."""
+    __tablename__ = "paper_embeddings"
+
+    id        = Column(Integer, primary_key=True, index=True)
+    paper_id  = Column(Integer, ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True)
+    embedding = Column(LargeBinary, nullable=False)  # numpy float32 bytes
+
+    paper = relationship("Paper", backref="embeddings")
+
+
+class AnalysisResult(Base):
+    """Persists AI analysis outputs for later retrieval."""
+    __tablename__ = "analysis_results"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    workspace_id  = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    analysis_type = Column(String(50), nullable=False)   # summaries | insights | review
+    paper_ids     = Column(JSON, nullable=True)           # list of paper IDs analysed
+    result        = Column(Text, nullable=False)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+
+    workspace = relationship("Workspace", backref="analysis_results")

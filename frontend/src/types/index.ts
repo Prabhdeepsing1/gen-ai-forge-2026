@@ -1,5 +1,3 @@
-// ── Auth ──────────────────────────────────────────────────────────────────────
-
 export interface User {
   id: number;
   email: string;
@@ -12,8 +10,6 @@ export interface AuthResponse {
   token_type: string;
   user: User;
 }
-
-// ── Workspaces ───────────────────────────────────────────────────────────────
 
 export interface Workspace {
   id: number;
@@ -28,8 +24,6 @@ export interface WorkspaceDetail extends Workspace {
   papers: Paper[];
 }
 
-// ── Papers ───────────────────────────────────────────────────────────────────
-
 export interface Paper {
   id?: number;
   external_id?: string;
@@ -43,16 +37,12 @@ export interface Paper {
   added_at?: string;
 }
 
-// ── Chat ─────────────────────────────────────────────────────────────────────
-
 export interface ChatMessage {
   id?: number;
   role: "user" | "assistant";
   content: string;
   created_at?: string;
 }
-
-// ── Documents ────────────────────────────────────────────────────────────────
 
 export interface UploadedDocument {
   id: number;
@@ -61,8 +51,6 @@ export interface UploadedDocument {
   summary: string | null;
   created_at: string;
 }
-
-// ── AI Tools ─────────────────────────────────────────────────────────────────
 
 export interface AISummaryResponse {
   summary: string;

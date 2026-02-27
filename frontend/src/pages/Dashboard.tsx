@@ -1,10 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { workspacesAPI } from "../api";
-import type { Workspace } from "../types";
+import { workspacesAPI } from "@/api";
+import type { Workspace } from "@/types";
 import toast from "react-hot-toast";
-import Spinner from "../components/Spinner";
-import { HiOutlinePlus, HiOutlineTrash } from "react-icons/hi";
+import { Spinner } from "@/components/Spinner";
+import { HiOutlinePlus, HiOutlineTrash, HiOutlineViewGrid } from "react-icons/hi";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -15,156 +15,105 @@ export default function Dashboard() {
   const [desc, setDesc] = useState("");
   const [creating, setCreating] = useState(false);
 
-  const fetchWorkspaces = async () => {
-    try {
-      const { data } = await workspacesAPI.list();
-      setWorkspaces(data.workspaces);
-    } catch {
-      toast.error("Failed to load workspaces");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchWorkspaces();
+    workspacesAPI.list().then(setWorkspaces).catch(() => toast.error("Failed to load workspaces")).finally(() => setLoading(false));
   }, []);
 
-  const handleCreate = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleCreate = async () => {
     if (!name.trim()) return;
     setCreating(true);
     try {
-      await workspacesAPI.create(name.trim(), desc.trim() || undefined);
-      toast.success("Workspace created");
+      const ws = await workspacesAPI.create(name.trim(), desc.trim() || undefined);
+      setWorkspaces((prev) => [ws, ...prev]);
       setName("");
       setDesc("");
       setShowCreate(false);
-      fetchWorkspaces();
-    } catch {
-      toast.error("Failed to create workspace");
+      toast.success("Workspace created");
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail ?? "Failed to create workspace");
     } finally {
       setCreating(false);
     }
   };
 
-  const handleDelete = async (id: number, wsName: string) => {
-    if (!confirm(`Delete "${wsName}"? This cannot be undone.`)) return;
+  const handleDelete = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    if (!confirm("Delete this workspace? This cannot be undone.")) return;
     try {
       await workspacesAPI.delete(id);
+      setWorkspaces((prev) => prev.filter((w) => w.id !== id));
       toast.success("Workspace deleted");
-      setWorkspaces((ws) => ws.filter((w) => w.id !== id));
     } catch {
-      toast.error("Failed to delete workspace");
+      toast.error("Failed to delete");
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center py-20">
-        <Spinner />
-      </div>
-    );
-  }
-
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-4xl mx-auto fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-start justify-between mb-8">
         <div>
-          <h1 className="text-lg font-semibold text-white">Workspaces</h1>
-          <p className="text-sm text-white/40 mt-0.5">
-            Organize your research papers into workspaces
-          </p>
+          <h1 className="text-xl font-bold text-foreground">Workspaces</h1>
+          <p className="text-sm text-muted-foreground mt-1">Organize your research papers into workspaces</p>
         </div>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="flex items-center gap-1.5 bg-white text-black text-xs font-medium px-3 py-1.5 rounded-md hover:bg-white/90 transition-colors"
-        >
-          <HiOutlinePlus size={14} />
+        <button onClick={() => setShowCreate(!showCreate)} className="btn-primary flex items-center gap-1.5 text-sm">
+          <HiOutlinePlus className="w-4 h-4" />
           New
         </button>
       </div>
 
       {/* Create form */}
       {showCreate && (
-        <form
-          onSubmit={handleCreate}
-          className="mb-6 border border-white/10 rounded-lg p-4 space-y-3"
-        >
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Workspace name"
-            className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder-white/25 outline-none focus:border-white/25 transition-colors"
-            autoFocus
-          />
-          <input
-            type="text"
-            value={desc}
-            onChange={(e) => setDesc(e.target.value)}
-            placeholder="Description (optional)"
-            className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder-white/25 outline-none focus:border-white/25 transition-colors"
-          />
-          <div className="flex gap-2 justify-end">
-            <button
-              type="button"
-              onClick={() => setShowCreate(false)}
-              className="text-xs text-white/40 hover:text-white px-3 py-1.5 rounded-md transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={creating || !name.trim()}
-              className="bg-white text-black text-xs font-medium px-3 py-1.5 rounded-md hover:bg-white/90 disabled:opacity-50 transition-colors"
-            >
-              {creating ? "Creating…" : "Create"}
-            </button>
+        <div className="card-interactive p-5 mb-6 fade-in-up">
+          <div className="space-y-3">
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Workspace name" className="w-full input-field" autoFocus />
+            <input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Description (optional)" className="w-full input-field" />
+            <div className="flex items-center gap-2 justify-end">
+              <button onClick={() => setShowCreate(false)} className="btn-ghost">Cancel</button>
+              <button onClick={handleCreate} disabled={creating || !name.trim()} className="btn-primary flex items-center gap-2">
+                {creating && <Spinner className="w-4 h-4" />}
+                Create
+              </button>
+            </div>
           </div>
-        </form>
+        </div>
       )}
 
-      {/* Workspace list */}
-      {workspaces.length === 0 ? (
-        <div className="text-center py-16 text-white/30 text-sm">
-          No workspaces yet. Create one to get started.
+      {/* Loading */}
+      {loading ? (
+        <div className="flex justify-center py-20"><Spinner className="w-7 h-7" /></div>
+      ) : workspaces.length === 0 ? (
+        <div className="border-2 border-dashed border-border rounded-xl p-12 text-center fade-in">
+          <HiOutlineViewGrid className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+          <p className="text-muted-foreground text-sm">No workspaces yet. Create one to get started.</p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {workspaces.map((ws) => (
+        <div className="space-y-3">
+          {workspaces.map((ws, i) => (
             <div
               key={ws.id}
-              className="group border border-white/8 rounded-lg p-4 hover:border-white/15 transition-colors cursor-pointer"
               onClick={() => navigate(`/workspace/${ws.id}`)}
+              className="group card-interactive p-5 cursor-pointer fade-in-up"
+              style={{ animationDelay: `${i * 50}ms` }}
             >
               <div className="flex items-start justify-between">
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-medium text-white truncate">
-                    {ws.name}
-                  </h3>
-                  {ws.description && (
-                    <p className="text-xs text-white/35 mt-0.5 truncate">
-                      {ws.description}
-                    </p>
-                  )}
-                  <div className="flex items-center gap-3 mt-2 text-xs text-white/25">
-                    <span>{ws.paper_count ?? 0} papers</span>
-                    <span>
+                  <h3 className="text-sm font-semibold text-foreground">{ws.name}</h3>
+                  {ws.description && <p className="text-sm text-muted-foreground mt-0.5 truncate">{ws.description}</p>}
+                  <div className="flex items-center gap-3 mt-2.5">
+                    <span className="text-xs font-mono text-muted-foreground bg-secondary px-2 py-0.5 rounded-full">
+                      {ws.paper_count ?? 0} papers
+                    </span>
+                    <span className="text-xs text-muted-foreground">
                       {new Date(ws.created_at).toLocaleDateString()}
                     </span>
                   </div>
                 </div>
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete(ws.id, ws.name);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 text-white/25 hover:text-red-400 p-1 transition-all"
-                  title="Delete workspace"
+                  onClick={(e) => handleDelete(e, ws.id)}
+                  className="opacity-0 group-hover:opacity-100 p-1.5 btn-danger-ghost transition-all"
                 >
-                  <HiOutlineTrash size={15} />
+                  <HiOutlineTrash className="w-4 h-4" />
                 </button>
               </div>
             </div>

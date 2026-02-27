@@ -5,7 +5,7 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import User
+from models import User, Workspace
 from utils.auth import (
     verify_password,
     get_password_hash,
@@ -56,6 +56,15 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    # Create a default workspace for the new user
+    default_ws = Workspace(
+        name="My Research",
+        description="Default workspace",
+        user_id=user.id,
+    )
+    db.add(default_ws)
+    db.commit()
 
     token = create_access_token(data={"sub": str(user.id)})
     return {

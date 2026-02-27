@@ -1,5 +1,6 @@
 # backend/main.py
 import os
+from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,7 @@ from routers import (
     chat_router,
     ai_tools_router,
     upload_router,
+    semantic_search_router,
 )
 
 
@@ -47,12 +49,7 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        FRONTEND_URL,
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,6 +62,7 @@ app.include_router(papers_router)
 app.include_router(chat_router)
 app.include_router(ai_tools_router)
 app.include_router(upload_router)
+app.include_router(semantic_search_router)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
@@ -73,10 +71,24 @@ def root():
     return {
         "status": "ok",
         "message": "ResearchHub AI API is running 🚀",
+        "version": "1.0.0",
         "docs": "/docs",
+        "endpoints": {
+            "auth": "/auth/login, /auth/register",
+            "workspaces": "/workspaces",
+            "papers": "/papers",
+            "chat": "/chat",
+            "analysis": "/ai/summarize, /ai/insights, /ai/literature-review",
+            "semantic_search": "/semantic-search/workspace/{id}",
+            "upload": "/upload/pdf",
+        },
     }
 
 
 @app.get("/health", tags=["Health"])
 def health():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "version": "1.0.0",
+    }

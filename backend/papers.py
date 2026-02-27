@@ -7,8 +7,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import User, Paper, WorkspacePaper
+from models import User, Paper, WorkspacePaper, PaperEmbedding
 from utils.auth import get_current_user
+from utils.embeddings import generate_embedding
 
 router = APIRouter(prefix="/papers", tags=["Papers"])
 
@@ -136,6 +137,16 @@ def import_paper(
         db.commit()
         db.refresh(paper)
 
+        # Generate and store vector embedding
+        text_for_embedding = f"{paper.title} {paper.abstract or ''}"
+        try:
+            emb_bytes = generate_embedding(text_for_embedding)
+            pe = PaperEmbedding(paper_id=paper.id, embedding=emb_bytes)
+            db.add(pe)
+            db.commit()
+        except Exception:
+            pass  # embedding is best-effort; don't block import
+
     # Auto-add to workspace if provided
     if payload.workspace_id:
         link_exists = db.query(WorkspacePaper).filter_by(
@@ -194,6 +205,8 @@ def delete_paper(
     ).first()
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
+    # Delete associated embeddings
+    db.query(PaperEmbedding).filter(PaperEmbedding.paper_id == paper_id).delete()
     db.delete(paper)
     db.commit()
     return {"message": "Paper deleted"}

@@ -1,208 +1,152 @@
-import { useEffect, useState, useRef } from "react";
-import { uploadAPI } from "../api";
-import type { UploadedDocument } from "../types";
+import { useState, useEffect } from "react";
+import { uploadAPI } from "@/api";
+import type { UploadedDocument } from "@/types";
 import toast from "react-hot-toast";
-import Spinner from "../components/Spinner";
+import { Spinner } from "@/components/Spinner";
 import {
   HiOutlineUpload,
-  HiOutlineTrash,
   HiOutlineDocumentText,
+  HiOutlineTrash,
   HiOutlineX,
+  HiOutlineChevronDown,
 } from "react-icons/hi";
 
 export default function Documents() {
-  const [documents, setDocuments] = useState<UploadedDocument[]>([]);
+  const [docs, setDocs] = useState<UploadedDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [selected, setSelected] = useState<UploadedDocument | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const fetchDocuments = async () => {
-    try {
-      const { data } = await uploadAPI.list();
-      setDocuments(data.documents);
-    } catch {
-      toast.error("Failed to load documents");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<UploadedDocument | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [showText, setShowText] = useState(false);
 
   useEffect(() => {
-    fetchDocuments();
+    uploadAPI.list().then(setDocs).catch(() => toast.error("Failed to load documents")).finally(() => setLoading(false));
   }, []);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      toast.error("Only PDF files are accepted");
-      return;
-    }
     setUploading(true);
     try {
-      await uploadAPI.pdf(file);
+      const res = await uploadAPI.pdf(file);
+      setDocs((prev) => [{ id: res.id, filename: res.filename, summary: res.summary, created_at: new Date().toISOString() }, ...prev]);
       toast.success("PDF uploaded & processed");
-      fetchDocuments();
     } catch (err: any) {
       toast.error(err?.response?.data?.detail ?? "Upload failed");
     } finally {
       setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
+      e.target.value = "";
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleExpand = async (id: number) => {
+    if (expandedId === id) {
+      setExpandedId(null);
+      setDetail(null);
+      setShowText(false);
+      return;
+    }
+    setExpandedId(id);
+    setLoadingDetail(true);
+    setShowText(false);
+    try {
+      const d = await uploadAPI.get(id);
+      setDetail(d);
+    } catch { toast.error("Failed to load document"); }
+    finally { setLoadingDetail(false); }
+  };
+
+  const handleDelete = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
     if (!confirm("Delete this document?")) return;
     try {
       await uploadAPI.delete(id);
+      setDocs((prev) => prev.filter((d) => d.id !== id));
+      if (expandedId === id) { setExpandedId(null); setDetail(null); }
       toast.success("Document deleted");
-      setDocuments((d) => d.filter((doc) => doc.id !== id));
-      if (selected?.id === id) setSelected(null);
-    } catch {
-      toast.error("Failed to delete document");
-    }
+    } catch { toast.error("Failed to delete"); }
   };
-
-  const handleView = async (doc: UploadedDocument) => {
-    if (selected?.id === doc.id) {
-      setSelected(null);
-      return;
-    }
-    setDetailLoading(true);
-    try {
-      const { data } = await uploadAPI.get(doc.id);
-      setSelected(data);
-    } catch {
-      toast.error("Failed to load document");
-    } finally {
-      setDetailLoading(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex justify-center py-20">
-        <Spinner />
-      </div>
-    );
-  }
 
   return (
-    <div className="max-w-4xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+    <div className="max-w-4xl mx-auto fade-in">
+      <div className="flex items-start justify-between mb-8">
         <div>
-          <h1 className="text-lg font-semibold text-white">Documents</h1>
-          <p className="text-sm text-white/40 mt-0.5">
-            Upload PDFs for AI text extraction &amp; summarization
-          </p>
+          <h1 className="text-xl font-bold text-foreground">Documents</h1>
+          <p className="text-sm text-muted-foreground mt-1">Upload PDFs for AI text extraction & summarization</p>
         </div>
-        <label className="flex items-center gap-1.5 bg-white text-black text-xs font-medium px-3 py-1.5 rounded-md hover:bg-white/90 transition-colors cursor-pointer">
-          <HiOutlineUpload size={14} />
-          {uploading ? "Uploading…" : "Upload PDF"}
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".pdf"
-            className="hidden"
-            onChange={handleUpload}
-            disabled={uploading}
-          />
+        <label className={`btn-primary flex items-center gap-1.5 text-sm cursor-pointer ${uploading ? "opacity-50 pointer-events-none" : ""}`}>
+          {uploading ? <Spinner className="w-4 h-4" /> : <HiOutlineUpload className="w-4 h-4" />}
+          {uploading ? "Processing…" : "Upload PDF"}
+          <input type="file" accept=".pdf" onChange={handleUpload} className="hidden" />
         </label>
       </div>
 
-      {/* Drag-drop hint */}
-      {documents.length === 0 && (
-        <div className="text-center py-16 border border-dashed border-white/10 rounded-lg">
-          <HiOutlineDocumentText
-            size={28}
-            className="mx-auto text-white/15 mb-2"
-          />
-          <p className="text-sm text-white/25">
-            No documents yet. Upload a PDF to get started.
-          </p>
+      {loading ? (
+        <div className="flex justify-center py-20"><Spinner className="w-7 h-7" /></div>
+      ) : docs.length === 0 ? (
+        <div className="border-2 border-dashed border-border rounded-xl p-12 text-center">
+          <HiOutlineDocumentText className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+          <p className="text-sm text-muted-foreground">No documents yet. Upload a PDF to get started.</p>
         </div>
-      )}
-
-      {/* Document list */}
-      <div className="space-y-2">
-        {documents.map((doc) => (
-          <div key={doc.id}>
-            <div
-              className="group border border-white/8 rounded-lg p-4 hover:border-white/12 transition-colors cursor-pointer"
-              onClick={() => handleView(doc)}
-            >
-              <div className="flex items-start justify-between">
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-medium text-white truncate">
-                    {doc.filename}
-                  </h3>
-                  {doc.summary && (
-                    <p className="text-xs text-white/30 mt-1 line-clamp-2">
-                      {doc.summary}
-                    </p>
-                  )}
-                  <p className="text-xs text-white/20 mt-1">
-                    {new Date(doc.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete(doc.id);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 text-white/20 hover:text-red-400 p-1 transition-all"
-                  title="Delete document"
-                >
-                  <HiOutlineTrash size={14} />
-                </button>
-              </div>
-            </div>
-
-            {/* Expanded detail */}
-            {selected?.id === doc.id && (
-              <div className="border border-white/10 border-t-0 rounded-b-lg p-4 -mt-0.5">
-                {detailLoading ? (
-                  <div className="flex justify-center py-4">
-                    <Spinner />
+      ) : (
+        <div className="space-y-3">
+          {docs.map((doc, i) => (
+            <div key={doc.id} className="fade-in-up" style={{ animationDelay: `${i * 40}ms` }}>
+              <div
+                onClick={() => handleExpand(doc.id)}
+                className="group card-interactive p-5 cursor-pointer"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm font-semibold text-foreground">{doc.filename}</h3>
+                    {doc.summary && <p className="text-sm text-secondary-foreground mt-1 line-clamp-2">{doc.summary}</p>}
+                    <p className="text-xs text-muted-foreground mt-2">{new Date(doc.created_at).toLocaleDateString()}</p>
                   </div>
-                ) : (
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <h4 className="text-xs font-medium text-white/50 uppercase tracking-wide">
-                        AI Summary
-                      </h4>
-                      <button
-                        onClick={() => setSelected(null)}
-                        className="text-white/25 hover:text-white transition-colors"
-                      >
-                        <HiOutlineX size={14} />
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button onClick={(e) => handleDelete(e, doc.id)} className="opacity-0 group-hover:opacity-100 p-1.5 btn-danger-ghost transition-all">
+                      <HiOutlineTrash className="w-4 h-4" />
+                    </button>
+                    <HiOutlineChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${expandedId === doc.id ? "rotate-180" : ""}`} />
+                  </div>
+                </div>
+              </div>
+
+              {expandedId === doc.id && (
+                <div className="bg-surface-2 border border-border border-t-0 rounded-b-xl p-5 fade-in">
+                  {loadingDetail ? (
+                    <div className="flex justify-center py-6"><Spinner /></div>
+                  ) : detail ? (
+                    <div className="space-y-4">
+                      {detail.summary && (
+                        <div>
+                          <span className="text-xs font-mono font-semibold text-muted-foreground uppercase tracking-wider">AI Summary</span>
+                          <p className="text-sm text-secondary-foreground mt-2 whitespace-pre-wrap leading-relaxed">{detail.summary}</p>
+                        </div>
+                      )}
+                      {detail.content && (
+                        <div>
+                          <button onClick={() => setShowText(!showText)} className="text-xs text-primary hover:text-primary-hover font-medium transition-colors">
+                            {showText ? "Hide extracted text" : "Show extracted text"}
+                          </button>
+                          {showText && (
+                            <pre className="mt-2 text-xs text-muted-foreground bg-surface-3 rounded-lg p-4 max-h-64 overflow-y-auto whitespace-pre-wrap font-mono">
+                              {detail.content}
+                            </pre>
+                          )}
+                        </div>
+                      )}
+                      <button onClick={() => { setExpandedId(null); setDetail(null); }} className="btn-ghost text-xs flex items-center gap-1">
+                        <HiOutlineX className="w-3.5 h-3.5" /> Close
                       </button>
                     </div>
-                    {selected.summary && (
-                      <p className="text-sm text-white/60 leading-relaxed whitespace-pre-wrap mb-4">
-                        {selected.summary}
-                      </p>
-                    )}
-                    {selected.content && (
-                      <details className="mt-2">
-                        <summary className="text-xs text-white/30 cursor-pointer hover:text-white/50 transition-colors">
-                          Show extracted text
-                        </summary>
-                        <pre className="mt-2 text-xs text-white/25 max-h-60 overflow-y-auto leading-relaxed whitespace-pre-wrap">
-                          {selected.content}
-                        </pre>
-                      </details>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

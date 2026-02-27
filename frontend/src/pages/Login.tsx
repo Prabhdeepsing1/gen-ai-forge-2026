@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
+import { useAuth } from "@/contexts/AuthContext";
 import toast from "react-hot-toast";
+import { Spinner } from "@/components/Spinner";
 
 export default function Login() {
   const { login } = useAuth();
@@ -18,65 +19,61 @@ export default function Login() {
       toast.success("Signed in");
       navigate("/dashboard");
     } catch (err: any) {
-      toast.error(
-        err?.response?.data?.detail ?? "Invalid email or password"
-      );
+      toast.error(err?.response?.data?.detail ?? "Invalid email or password");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#09090b] flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
-        {/* Header */}
-        <div className="mb-8 text-center">
-          <h1 className="text-lg font-semibold text-white tracking-tight">
-            ResearchHub
+    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+      <div className="w-full max-w-sm fade-in-up">
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center gap-2.5 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
+              <span className="text-primary-foreground font-bold text-lg">R</span>
+            </div>
+          </div>
+          <h1 className="text-2xl font-bold text-foreground tracking-tight">
+            Research<span className="text-gradient-brand">Hub</span>
           </h1>
-          <p className="mt-1 text-sm text-white/40">Sign in to your account</p>
+          <p className="text-sm text-muted-foreground mt-1">Sign in to your account</p>
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="card-interactive p-6 space-y-4">
           <div>
-            <label className="block text-xs text-white/50 mb-1.5">Email</label>
+            <label className="block text-sm font-medium text-foreground mb-1.5">Email</label>
             <input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder-white/25 outline-none focus:border-white/25 transition-colors"
               placeholder="you@example.com"
+              className="w-full input-field"
             />
           </div>
-
           <div>
-            <label className="block text-xs text-white/50 mb-1.5">
-              Password
-            </label>
+            <label className="block text-sm font-medium text-foreground mb-1.5">Password</label>
             <input
               type="password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder-white/25 outline-none focus:border-white/25 transition-colors"
               placeholder="••••••••"
+              className="w-full input-field"
             />
           </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-white text-black text-sm font-medium rounded-md py-2 hover:bg-white/90 disabled:opacity-50 transition-colors"
-          >
+          <button type="submit" disabled={loading} className="w-full btn-primary flex items-center justify-center gap-2">
+            {loading && <Spinner className="w-4 h-4" />}
             {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
 
-        <p className="mt-6 text-center text-xs text-white/30">
+        <p className="text-center text-sm text-muted-foreground mt-5">
           Don't have an account?{" "}
-          <Link to="/register" className="text-white/60 hover:text-white">
+          <Link to="/register" className="text-primary hover:text-primary-hover transition-colors font-medium">
             Create one
           </Link>
         </p>

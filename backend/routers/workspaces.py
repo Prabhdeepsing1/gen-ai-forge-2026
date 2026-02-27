@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import User, Workspace, WorkspacePaper, Paper
+from models import User, Workspace, WorkspacePaper, Paper, PaperEmbedding, AnalysisResult, Conversation
 from utils.auth import get_current_user
 
 router = APIRouter(prefix="/workspaces", tags=["Workspaces"])
@@ -151,6 +151,21 @@ def delete_workspace(
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
+    # Clean up related data explicitly
+    # 1. Delete conversations
+    db.query(Conversation).filter(Conversation.workspace_id == workspace_id).delete()
+    # 2. Delete analysis results
+    db.query(AnalysisResult).filter(AnalysisResult.workspace_id == workspace_id).delete()
+    # 3. Delete paper embeddings for papers in this workspace
+    paper_ids = [
+        wp.paper_id
+        for wp in db.query(WorkspacePaper).filter(WorkspacePaper.workspace_id == workspace_id).all()
+    ]
+    if paper_ids:
+        db.query(PaperEmbedding).filter(PaperEmbedding.paper_id.in_(paper_ids)).delete(synchronize_session=False)
+    # 4. Delete workspace-paper links
+    db.query(WorkspacePaper).filter(WorkspacePaper.workspace_id == workspace_id).delete()
+    # 5. Delete workspace itself
     db.delete(ws)
     db.commit()
     return {"message": "Workspace deleted"}
