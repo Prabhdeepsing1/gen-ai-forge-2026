@@ -92,6 +92,13 @@ export const aiAPI = {
     api.post<AIInsightsResponse>("/ai/insights", { workspace_id: workspaceId }).then((r) => r.data),
   litReview: (workspaceId: number) =>
     api.post<AILitReviewResponse>("/ai/literature-review", { workspace_id: workspaceId }).then((r) => r.data),
+  analysisHistory: (workspaceId: number) =>
+    api.get(`/ai/history/${workspaceId}`),
+};
+
+export const semanticSearchAPI = {
+  search: (workspaceId: number, query: string, topK = 5) =>
+    api.post(`/semantic-search/workspace/${workspaceId}`, { query, top_k: topK }),
 };
 
 export const uploadAPI = {

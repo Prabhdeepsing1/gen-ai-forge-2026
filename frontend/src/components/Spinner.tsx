@@ -10,3 +10,5 @@ export function Spinner({ className }: { className?: string }) {
     />
   );
 }
+
+export default Spinner;

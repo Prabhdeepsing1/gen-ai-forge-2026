@@ -66,3 +66,18 @@ export interface AILitReviewResponse {
   literature_review: string;
   paper_count: number;
 }
+
+export interface SemanticSearchResult {
+  paper_id: number;
+  title: string;
+  abstract: string | null;
+  similarity: number;
+}
+
+export interface AnalysisResult {
+  id: number;
+  analysis_type: string;
+  result: string;
+  paper_ids: number[] | null;
+  created_at: string;
+}
