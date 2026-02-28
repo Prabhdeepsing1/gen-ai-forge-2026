@@ -156,7 +156,7 @@ export const aiAPI = {
   litReview: (workspaceId: number) =>
     api.post<AILitReviewResponse>("/ai/literature-review", { workspace_id: workspaceId }).then((r) => r.data),
   analysisHistory: (workspaceId: number) =>
-    api.get(`/ai/history/${workspaceId}`),
+    api.get(`/ai/analysis/${workspaceId}`),
 };
 
 export const semanticSearchAPI = {
@@ -237,5 +237,17 @@ export const buildPaperAPI = {
       }
     }
     onDone();
+  },
+};
+
+export const audioAPI = {
+  /** Send an audio blob to the backend for Whisper transcription */
+  transcribe: async (audioBlob: Blob): Promise<string> => {
+    const fd = new FormData();
+    fd.append("file", audioBlob, "recording.webm");
+    const res = await api.post<{ text: string }>("/audio/transcribe", fd, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return res.data.text;
   },
 };

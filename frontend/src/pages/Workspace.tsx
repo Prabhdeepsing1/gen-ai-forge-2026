@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback, type FormEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { workspacesAPI, papersAPI, chatAPI, aiAPI, semanticSearchAPI } from "../api";
+import { workspacesAPI, papersAPI, chatAPI, aiAPI, semanticSearchAPI, audioAPI } from "../api";
 import type { WorkspaceDetail, Paper, ChatMessage, SemanticSearchResult, AnalysisResult } from "../types";
 import toast from "react-hot-toast";
 import Spinner from "../components/Spinner";
@@ -27,7 +27,13 @@ import {
   HiOutlineClipboardCopy,
   HiOutlineCheck,
   HiOutlineChevronDown,
+  HiOutlineMicrophone,
+  HiOutlineVolumeUp,
+  HiOutlineStop,
 } from "react-icons/hi";
+import { useAudioRecorder } from "../hooks/useAudioRecorder";
+import { useTextToSpeech } from "../hooks/useTextToSpeech";
+import { useTypewriter } from "../hooks/useTypewriter";
 
 type Tab = "papers" | "chat" | "ai" | "search" | "history";
 
@@ -224,6 +230,14 @@ export default function WorkspacePage() {
   const [sending, setSending] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // ── Audio (STT + TTS) ──────────────────────────────────────────
+  const { recording, elapsed, startRecording, stopRecording } = useAudioRecorder();
+  const { speaking, speakingId, speak, stop: stopSpeech } = useTextToSpeech();
+  const [transcribing, setTranscribing] = useState(false);
+  const { displayedText, isTyping, typewrite, cancel: cancelTypewriter } = useTypewriter(28);
+  const [pipelinePhase, setPipelinePhase] = useState<string | null>(null);
+  const typingMsgIdx = useRef<number>(-1);
+
   // ── AI tools ───────────────────────────────────────────────────
   const [aiResult, setAiResult] = useState<string>("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -375,13 +389,43 @@ export default function WorkspacePage() {
     setChatInput("");
     setMessages((m) => [...m, { role: "user", content }]);
     setSending(true);
+
+    // Show pipeline phases
+    setPipelinePhase("Embedding query via MiniLM-L6…");
+    const phaseTimer1 = setTimeout(() => setPipelinePhase("Searching FAISS vector index…"), 800);
+    const phaseTimer2 = setTimeout(() => setPipelinePhase("Retrieving relevant paper context…"), 1600);
+    const phaseTimer3 = setTimeout(() => setPipelinePhase("Generating response via Groq LLaMA 3.3…"), 2400);
+
     try {
       const data = await chatAPI.send(content, workspaceId);
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", content: data.response },
-      ]);
+      clearTimeout(phaseTimer1);
+      clearTimeout(phaseTimer2);
+      clearTimeout(phaseTimer3);
+      setPipelinePhase(null);
+
+      // Add empty assistant msg, then typewrite into it
+      setMessages((m) => [...m, { role: "assistant", content: "" }]);
+      typingMsgIdx.current = -1; // will be set after state update
+      // Small delay to let state settle
+      await new Promise((r) => setTimeout(r, 50));
+      setMessages((prev) => {
+        typingMsgIdx.current = prev.length - 1;
+        return prev;
+      });
+
+      await typewrite(data.response);
+
+      // Set final full message
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { role: "assistant", content: data.response };
+        return updated;
+      });
     } catch {
+      clearTimeout(phaseTimer1);
+      clearTimeout(phaseTimer2);
+      clearTimeout(phaseTimer3);
+      setPipelinePhase(null);
       toast.error("Chat failed");
     } finally {
       setSending(false);
@@ -396,6 +440,24 @@ export default function WorkspacePage() {
       toast.success("Chat cleared");
     } catch {
       toast.error("Failed to clear chat");
+    }
+  };
+
+  // ── Voice input handler ────────────────────────────────────────
+  const handleVoiceInput = async () => {
+    if (recording) {
+      stopRecording();
+      return;
+    }
+    try {
+      const blob = await startRecording();
+      setTranscribing(true);
+      const text = await audioAPI.transcribe(blob);
+      if (text) setChatInput((prev) => (prev ? prev + " " + text : text));
+    } catch (err: any) {
+      toast.error(err?.message || "Voice input failed");
+    } finally {
+      setTranscribing(false);
     }
   };
 
@@ -566,6 +628,21 @@ export default function WorkspacePage() {
       {/* ── Chat tab ──────────────────────────────────────────────── */}
       {tab === "chat" && (
         <div className="flex flex-col" style={{ height: editorOpen ? "calc(100% - 50px)" : "calc(100vh - 260px)" }}>
+          {/* RAG Pipeline badges */}
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">Pipeline</span>
+            {[
+              { label: "MiniLM-L6", color: "text-sky-400 bg-sky-500/10 border-sky-500/20" },
+              { label: "FAISS", color: "text-violet-400 bg-violet-500/10 border-violet-500/20" },
+              { label: "RAG", color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" },
+              { label: "Groq LLaMA 3.3 70B", color: "text-amber-400 bg-amber-500/10 border-amber-500/20" },
+            ].map((b) => (
+              <span key={b.label} className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${b.color}`}>
+                {b.label}
+              </span>
+            ))}
+          </div>
+
           {/* Messages */}
           <div className="flex-1 overflow-y-auto mb-4 space-y-3">
             {messages.length === 0 && (
@@ -577,50 +654,119 @@ export default function WorkspacePage() {
                 <p className="text-sm text-zinc-500">
                   Ask questions about the papers in this workspace
                 </p>
+                <p className="text-[11px] text-zinc-600 mt-2 max-w-sm mx-auto">
+                  Your query is embedded, matched against papers via FAISS semantic search, and answered by Groq LLaMA 3.3 70B
+                </p>
               </div>
             )}
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                className={`flex ${
-                  m.role === "user" ? "justify-end" : "justify-start"
-                }`}
-              >
+            {messages.map((m, i) => {
+              // For the last assistant message while typing, show typewriter text
+              const isCurrentlyTyping = isTyping && i === typingMsgIdx.current;
+              const content = isCurrentlyTyping ? displayedText : m.content;
+
+              return (
                 <div
-                  className={`max-w-[80%] rounded-xl px-4 py-3 text-sm leading-relaxed ${
-                    m.role === "user"
-                      ? "bg-indigo-600 text-white"
-                      : "bg-[#111118] text-zinc-300 border border-zinc-800"
+                  key={i}
+                  className={`flex ${
+                    m.role === "user" ? "justify-end" : "justify-start"
                   }`}
                 >
-                  <div className="prose-md">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
-                  </div>
-                  {/* Apply / Copy buttons for assistant messages */}
-                  {m.role === "assistant" && (
-                    <div className="flex items-center gap-1.5 mt-2.5 pt-2 border-t border-zinc-700/50">
-                      <button
-                        onClick={() => handleApplyToEditor(m.content)}
-                        className="flex items-center gap-1 text-[11px] font-medium text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 px-2.5 py-1 rounded-md transition-all"
-                        title="Insert into editor at cursor position"
-                      >
-                        <HiOutlinePencilAlt size={12} />
-                        Apply to Editor
-                      </button>
-                      <button
-                        onClick={() => handleCopyToClipboard(m.content)}
-                        className="flex items-center gap-1 text-[11px] font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-700/30 hover:bg-zinc-700/50 px-2.5 py-1 rounded-md transition-all"
-                        title="Copy response to clipboard"
-                      >
-                        <HiOutlineClipboardCopy size={12} />
-                        Copy
-                      </button>
+                  <div
+                    className={`max-w-[80%] rounded-xl px-4 py-3 text-sm leading-relaxed ${
+                      m.role === "user"
+                        ? "bg-indigo-600 text-white"
+                        : "bg-[#111118] text-zinc-300 border border-zinc-800"
+                    }`}
+                  >
+                    <div className="prose-md">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                      {isCurrentlyTyping && (
+                        <span className="inline-block w-1.5 h-4 bg-indigo-400 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
+                      )}
                     </div>
-                  )}
+                    {/* Apply / Copy / Listen buttons for completed assistant messages */}
+                    {m.role === "assistant" && !isCurrentlyTyping && m.content && (
+                      <div className="flex items-center gap-1.5 mt-2.5 pt-2 border-t border-zinc-700/50">
+                        <button
+                          onClick={() => handleApplyToEditor(m.content)}
+                          className="flex items-center gap-1 text-[11px] font-medium text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 px-2.5 py-1 rounded-md transition-all"
+                          title="Insert into editor at cursor position"
+                        >
+                          <HiOutlinePencilAlt size={12} />
+                          Apply to Editor
+                        </button>
+                        <button
+                          onClick={() => handleCopyToClipboard(m.content)}
+                          className="flex items-center gap-1 text-[11px] font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-700/30 hover:bg-zinc-700/50 px-2.5 py-1 rounded-md transition-all"
+                          title="Copy response to clipboard"
+                        >
+                          <HiOutlineClipboardCopy size={12} />
+                          Copy
+                        </button>
+                        <button
+                          onClick={() =>
+                            speaking && speakingId === `ws-${i}`
+                              ? stopSpeech()
+                              : speak(m.content, `ws-${i}`)
+                          }
+                          className={`flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${
+                            speaking && speakingId === `ws-${i}`
+                              ? "text-amber-400 bg-amber-500/10 hover:bg-amber-500/20"
+                              : "text-zinc-400 hover:text-zinc-200 bg-zinc-700/30 hover:bg-zinc-700/50"
+                          }`}
+                          title={speaking && speakingId === `ws-${i}` ? "Stop listening" : "Listen"}
+                        >
+                          {speaking && speakingId === `ws-${i}` ? (
+                            <><HiOutlineStop size={12} /> Stop</>
+                          ) : (
+                            <><HiOutlineVolumeUp size={12} /> Listen</>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Processing pipeline indicator */}
+            {sending && pipelinePhase && (
+              <div className="flex justify-start">
+                <div className="bg-[#111118] border border-zinc-800 rounded-xl px-4 py-3 max-w-[80%]">
+                  <div className="flex items-center gap-2.5">
+                    <div className="relative w-4 h-4 flex-shrink-0">
+                      <div className="absolute inset-0 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin" />
+                    </div>
+                    <span className="text-xs text-zinc-400 animate-pulse">{pipelinePhase}</span>
+                  </div>
+                  {/* Pipeline steps visualization */}
+                  <div className="flex items-center gap-1 mt-2.5 pt-2 border-t border-zinc-800/60">
+                    {[
+                      { label: "Embed", done: !pipelinePhase.includes("Embedding") },
+                      { label: "Search", done: !pipelinePhase.includes("Embedding") && !pipelinePhase.includes("Searching") },
+                      { label: "Retrieve", done: pipelinePhase.includes("Generating") },
+                      { label: "Generate", done: false },
+                    ].map((step, idx) => (
+                      <div key={step.label} className="flex items-center gap-1">
+                        {idx > 0 && <div className={`w-3 h-px ${step.done ? "bg-indigo-500" : "bg-zinc-700"}`} />}
+                        <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${
+                          step.done
+                            ? "text-indigo-300 bg-indigo-500/15"
+                            : pipelinePhase.toLowerCase().includes(step.label.toLowerCase())
+                            ? "text-amber-300 bg-amber-500/15 animate-pulse"
+                            : "text-zinc-600 bg-zinc-800"
+                        }`}>
+                          {step.done ? "✓ " : ""}{step.label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-            ))}
-            {sending && (
+            )}
+
+            {/* Fallback spinner if pipeline phase hasn't started yet */}
+            {sending && !pipelinePhase && !isTyping && (
               <div className="flex justify-start">
                 <div className="bg-[#111118] border border-zinc-800 rounded-xl px-4 py-3">
                   <Spinner className="w-4 h-4" />
@@ -641,6 +787,22 @@ export default function WorkspacePage() {
                 className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-3.5 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all"
                 disabled={sending}
               />
+              {/* Mic button */}
+              <button
+                type="button"
+                onClick={handleVoiceInput}
+                disabled={sending || transcribing}
+                className={`p-2.5 rounded-lg transition-all ${
+                  recording
+                    ? "bg-red-500 text-white animate-pulse"
+                    : transcribing
+                    ? "bg-amber-500 text-white"
+                    : "bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700"
+                }`}
+                title={recording ? `Recording… ${elapsed}s — click to stop` : transcribing ? "Transcribing…" : "Voice input"}
+              >
+                <HiOutlineMicrophone size={16} />
+              </button>
               <button
                 type="submit"
                 disabled={sending || !chatInput.trim()}
@@ -706,11 +868,28 @@ export default function WorkspacePage() {
 
           {/* Result area */}
           {aiLoading && (
-            <div className="flex items-center gap-3 py-8 justify-center">
-              <Spinner />
-              <span className="text-sm text-zinc-400">
-                Generating {aiTool}…
-              </span>
+            <div className="bg-[#111118] border border-zinc-800 rounded-xl p-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="relative w-5 h-5 flex-shrink-0">
+                  <div className="absolute inset-0 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin" />
+                </div>
+                <span className="text-sm text-zinc-300 font-medium">Generating {aiTool}…</span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {[
+                  { label: "Collecting paper data", delay: "0s" },
+                  { label: "Building context window", delay: "0.5s" },
+                  { label: "Groq LLM processing", delay: "1s" },
+                ].map((step, idx) => (
+                  <span
+                    key={idx}
+                    className="text-[10px] text-zinc-500 bg-zinc-800/50 px-2 py-0.5 rounded animate-pulse"
+                    style={{ animationDelay: step.delay }}
+                  >
+                    {step.label}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
 
@@ -751,9 +930,23 @@ export default function WorkspacePage() {
       {tab === "search" && (
         <div>
           <div className="mb-6">
+            {/* Tech badges */}
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">Engine</span>
+              {[
+                { label: "Sentence-Transformers", color: "text-sky-400 bg-sky-500/10 border-sky-500/20" },
+                { label: "all-MiniLM-L6-v2", color: "text-violet-400 bg-violet-500/10 border-violet-500/20" },
+                { label: "FAISS Index", color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" },
+                { label: "Cosine Similarity", color: "text-amber-400 bg-amber-500/10 border-amber-500/20" },
+              ].map((b) => (
+                <span key={b.label} className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${b.color}`}>
+                  {b.label}
+                </span>
+              ))}
+            </div>
             <p className="text-sm text-zinc-400 mb-4">
               Search papers in this workspace using AI-powered semantic
-              similarity. Results are ranked by relevance to your query.
+              similarity. Your query is embedded into a 384-dim vector and matched against all indexed papers via FAISS.
             </p>
             <form onSubmit={handleSemanticSearch} className="flex gap-2">
               <input
@@ -775,11 +968,28 @@ export default function WorkspacePage() {
           </div>
 
           {semSearching && (
-            <div className="flex items-center gap-3 py-8 justify-center">
-              <Spinner />
-              <span className="text-sm text-zinc-400">
-                Computing similarities…
-              </span>
+            <div className="bg-[#111118] border border-zinc-800 rounded-xl p-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="relative w-5 h-5 flex-shrink-0">
+                  <div className="absolute inset-0 rounded-full border-2 border-violet-500/30 border-t-violet-400 animate-spin" />
+                </div>
+                <span className="text-sm text-zinc-300">Computing semantic similarities…</span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {[
+                  { label: "Embedding query…", delay: "0s" },
+                  { label: "FAISS index lookup…", delay: "0.3s" },
+                  { label: "Ranking by cosine similarity…", delay: "0.6s" },
+                ].map((step, idx) => (
+                  <span
+                    key={idx}
+                    className="text-[10px] text-zinc-500 bg-zinc-800/50 px-2 py-0.5 rounded animate-pulse"
+                    style={{ animationDelay: step.delay }}
+                  >
+                    {step.label}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
 

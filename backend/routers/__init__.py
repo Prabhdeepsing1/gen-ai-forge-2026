@@ -7,6 +7,7 @@ from routers.ai_tools import router as ai_tools_router
 from routers.upload import router as upload_router
 from routers.semantic_search import router as semantic_search_router
 from routers.build_paper import router as build_paper_router
+from routers.audio import router as audio_router
 
 __all__ = [
     "auth_router",
@@ -17,4 +18,5 @@ __all__ = [
     "upload_router",
     "semantic_search_router",
     "build_paper_router",
+    "audio_router",
 ]

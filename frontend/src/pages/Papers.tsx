@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { papersAPI } from "@/api";
+import { papersAPI, audioAPI } from "@/api";
 import type { Paper } from "@/types";
 import toast from "react-hot-toast";
 import { Spinner } from "@/components/Spinner";
@@ -11,7 +11,12 @@ import {
   HiOutlineX,
   HiOutlineChevronDown,
   HiOutlineArrowLeft,
+  HiOutlineMicrophone,
+  HiOutlineVolumeUp,
+  HiOutlineStop,
 } from "react-icons/hi";
+import { useAudioRecorder } from "@/hooks/useAudioRecorder";
+import { useTextToSpeech } from "@/hooks/useTextToSpeech";
 
 interface ChatMsg {
   role: "user" | "assistant";
@@ -95,6 +100,25 @@ function PaperChatPanel({
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // ── Audio hooks ──
+  const { recording, elapsed, startRecording, stopRecording } = useAudioRecorder();
+  const { speaking, speakingId, speak, stop: stopSpeech } = useTextToSpeech();
+  const [transcribing, setTranscribing] = useState(false);
+
+  const handleVoiceInput = async () => {
+    if (recording) { stopRecording(); return; }
+    try {
+      const blob = await startRecording();
+      setTranscribing(true);
+      const text = await audioAPI.transcribe(blob);
+      if (text) setInput((prev) => (prev ? prev + " " + text : text));
+    } catch (err: any) {
+      toast.error(err?.message || "Voice input failed");
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
   // Auto-scroll on new messages
   useEffect(() => {
     if (scrollRef.current) {
@@ -116,23 +140,57 @@ function PaperChatPanel({
     const assistantIdx = updatedMessages.length;
     setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
+    // Token buffer — accumulates tokens and flushes with a delay for natural pacing
+    let tokenBuffer: string[] = [];
+    let flushing = false;
+
+    const flushBuffer = () => {
+      if (flushing || tokenBuffer.length === 0) return;
+      flushing = true;
+      const next = tokenBuffer.shift()!;
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[assistantIdx] = {
+          ...updated[assistantIdx],
+          content: updated[assistantIdx].content + next,
+        };
+        return updated;
+      });
+      setTimeout(() => {
+        flushing = false;
+        flushBuffer();
+      }, 18); // 18ms between tokens for a natural streaming feel
+    };
+
     await papersAPI.chatStream(
       paper,
       text,
       updatedMessages.map((m) => ({ role: m.role, content: m.content })),
-      // onToken — append each token to the streaming message
+      // onToken — buffer tokens for paced rendering
       (token: string) => {
-        setMessages((prev) => {
-          const updated = [...prev];
-          updated[assistantIdx] = {
-            ...updated[assistantIdx],
-            content: updated[assistantIdx].content + token,
-          };
-          return updated;
-        });
+        tokenBuffer.push(token);
+        flushBuffer();
       },
-      // onDone
-      () => setSending(false),
+      // onDone — flush remaining buffer then mark done
+      () => {
+        const flushRemaining = () => {
+          if (tokenBuffer.length > 0) {
+            const next = tokenBuffer.shift()!;
+            setMessages((prev) => {
+              const updated = [...prev];
+              updated[assistantIdx] = {
+                ...updated[assistantIdx],
+                content: updated[assistantIdx].content + next,
+              };
+              return updated;
+            });
+            setTimeout(flushRemaining, 18);
+          } else {
+            setSending(false);
+          }
+        };
+        setTimeout(flushRemaining, 20);
+      },
       // onError
       (err: string) => {
         toast.error("Failed to get response");
@@ -168,6 +226,20 @@ function PaperChatPanel({
             {(paper.authors?.length ?? 0) > 3 && " et al."}
           </p>
         </div>
+      </div>
+
+      {/* Tech stack badges */}
+      <div className="flex items-center gap-1.5 px-4 py-2 border-b border-border/50 flex-wrap">
+        <span className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/50">Powered by</span>
+        {[
+          { label: "Groq", color: "text-amber-400 bg-amber-500/10 border-amber-500/20" },
+          { label: "LLaMA 3.3 70B", color: "text-violet-400 bg-violet-500/10 border-violet-500/20" },
+          { label: "SSE Streaming", color: "text-sky-400 bg-sky-500/10 border-sky-500/20" },
+        ].map((b) => (
+          <span key={b.label} className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full border ${b.color}`}>
+            {b.label}
+          </span>
+        ))}
       </div>
 
       {/* Messages area */}
@@ -234,6 +306,30 @@ function PaperChatPanel({
               ) : (
                 <p>{msg.content}</p>
               )}
+              {/* TTS Listen button for assistant messages */}
+              {msg.role === "assistant" && msg.content && (
+                <div className="flex items-center gap-1.5 mt-2 pt-1.5 border-t border-border/40">
+                  <button
+                    onClick={() =>
+                      speaking && speakingId === `paper-${i}`
+                        ? stopSpeech()
+                        : speak(msg.content, `paper-${i}`)
+                    }
+                    className={`flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md transition-all ${
+                      speaking && speakingId === `paper-${i}`
+                        ? "text-amber-400 bg-amber-500/10 hover:bg-amber-500/20"
+                        : "text-muted-foreground hover:text-foreground bg-surface-2 hover:bg-surface-2/80"
+                    }`}
+                    title={speaking && speakingId === `paper-${i}` ? "Stop" : "Listen"}
+                  >
+                    {speaking && speakingId === `paper-${i}` ? (
+                      <><HiOutlineStop className="w-3 h-3" /> Stop</>
+                    ) : (
+                      <><HiOutlineVolumeUp className="w-3 h-3" /> Listen</>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -258,6 +354,21 @@ function PaperChatPanel({
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
             disabled={sending}
           />
+          <button
+            type="button"
+            onClick={handleVoiceInput}
+            disabled={sending || transcribing}
+            className={`px-3 rounded-lg text-sm transition-all ${
+              recording
+                ? "bg-red-500 text-white animate-pulse"
+                : transcribing
+                ? "bg-amber-500 text-white"
+                : "bg-surface-2 border border-border text-muted-foreground hover:text-foreground hover:border-primary/30"
+            }`}
+            title={recording ? `Recording… ${elapsed}s` : transcribing ? "Transcribing…" : "Voice input"}
+          >
+            <HiOutlineMicrophone className="w-4 h-4" />
+          </button>
           <button
             onClick={handleSend}
             disabled={sending || !input.trim()}

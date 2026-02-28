@@ -19,6 +19,7 @@ from routers import (
     upload_router,
     semantic_search_router,
     build_paper_router,
+    audio_router,
 )
 from utils.vector_store import sync_papers_from_db
 
@@ -76,6 +77,7 @@ app.include_router(ai_tools_router)
 app.include_router(upload_router)
 app.include_router(semantic_search_router)
 app.include_router(build_paper_router)
+app.include_router(audio_router)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
