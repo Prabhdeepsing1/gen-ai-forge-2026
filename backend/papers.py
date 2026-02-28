@@ -1,15 +1,18 @@
 # backend/routers/papers.py
+import json
 import httpx
 import xml.etree.ElementTree as ET
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models import User, Paper, WorkspacePaper, PaperEmbedding
 from utils.auth import get_current_user
-from utils.embeddings import generate_embedding
+from utils.vector_store import add_paper as vs_add_paper, delete_paper as vs_delete_paper
+from utils.groq_client import client as groq_client, MODEL_CONFIG
 
 router = APIRouter(prefix="/papers", tags=["Papers"])
 
@@ -33,6 +36,19 @@ class PaperImport(BaseModel):
     url: Optional[str] = None
     pdf_url: Optional[str] = None
     workspace_id: Optional[int] = None   # if set, auto-add to workspace
+
+
+class PaperChatMessage(BaseModel):
+    role: str   # "user" | "assistant"
+    content: str
+
+
+class PaperChatRequest(BaseModel):
+    title: str
+    abstract: Optional[str] = None
+    authors: Optional[List[str]] = []
+    message: str
+    history: Optional[List[PaperChatMessage]] = []
 
 
 # ── arXiv helpers ─────────────────────────────────────────────────────────────
@@ -137,13 +153,9 @@ def import_paper(
         db.commit()
         db.refresh(paper)
 
-        # Generate and store vector embedding
-        text_for_embedding = f"{paper.title} {paper.abstract or ''}"
+        # Index paper into ChromaDB vector store
         try:
-            emb_bytes = generate_embedding(text_for_embedding)
-            pe = PaperEmbedding(paper_id=paper.id, embedding=emb_bytes)
-            db.add(pe)
-            db.commit()
+            vs_add_paper(paper.id, paper.title, paper.abstract)
         except Exception:
             pass  # embedding is best-effort; don't block import
 
@@ -205,8 +217,70 @@ def delete_paper(
     ).first()
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
-    # Delete associated embeddings
+    # Delete associated embeddings from legacy table and ChromaDB
     db.query(PaperEmbedding).filter(PaperEmbedding.paper_id == paper_id).delete()
+    vs_delete_paper(paper_id)
     db.delete(paper)
     db.commit()
     return {"message": "Paper deleted"}
+
+
+# ── Chat with Paper ───────────────────────────────────────────────────────────
+
+PAPER_SYSTEM_PROMPT = """You are a research paper assistant. You are given the title, authors, and abstract of an academic paper. Answer the user's questions based ONLY on the information available in the paper's abstract. If the abstract does not contain enough information to fully answer, say so and provide what you can infer.
+
+Be concise, accurate, and scholarly in tone. Use markdown formatting for readability."""
+
+
+@router.post("/chat")
+def chat_with_paper(
+    payload: PaperChatRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Chat with a research paper using SSE streaming."""
+
+    # Build paper context
+    authors_str = ", ".join(payload.authors) if payload.authors else "Unknown"
+    paper_context = (
+        f"**Paper Title:** {payload.title}\n"
+        f"**Authors:** {authors_str}\n"
+        f"**Abstract:** {payload.abstract or 'No abstract available.'}"
+    )
+
+    messages = [
+        {"role": "system", "content": PAPER_SYSTEM_PROMPT},
+        {"role": "user", "content": f"Here is the paper I want to discuss:\n\n{paper_context}"},
+        {"role": "assistant", "content": "I've read the paper. What would you like to know about it?"},
+    ]
+
+    # Append conversation history
+    for msg in (payload.history or []):
+        messages.append({"role": msg.role, "content": msg.content})
+
+    # Append current user message
+    messages.append({"role": "user", "content": payload.message})
+
+    def generate():
+        try:
+            stream = groq_client.chat.completions.create(
+                messages=messages,
+                stream=True,
+                **MODEL_CONFIG,
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta and delta.content:
+                    yield f"data: {json.dumps({'token': delta.content})}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

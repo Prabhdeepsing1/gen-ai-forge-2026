@@ -28,6 +28,7 @@ import {
   LuTable,
   LuDownload,
   LuUpload,
+  LuSigma,
 } from "react-icons/lu";
 
 interface ToolbarProps {
@@ -78,6 +79,20 @@ export function EditorToolbar({ editor, onExportHTML, onImportHTML }: ToolbarPro
 
   const addTable = () => {
     editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+  };
+
+  const addInlineMath = () => {
+    const latex = window.prompt("Inline LaTeX (e.g. E = mc^2):");
+    if (latex !== null) {
+      (editor.commands as any).insertMathInline(latex);
+    }
+  };
+
+  const addDisplayMath = () => {
+    const latex = window.prompt("Display LaTeX (e.g. \\int_0^\\infty e^{-x} dx = 1):");
+    if (latex !== null) {
+      (editor.commands as any).insertMathDisplay(latex);
+    }
   };
 
   return (
@@ -265,6 +280,16 @@ export function EditorToolbar({ editor, onExportHTML, onImportHTML }: ToolbarPro
       </ToolbarBtn>
       <ToolbarBtn onClick={addTable} title="Insert Table">
         <LuTable size={14} />
+      </ToolbarBtn>
+
+      <ToolbarSep />
+
+      {/* LaTeX */}
+      <ToolbarBtn onClick={addInlineMath} title="Insert Inline Math ($…$)">
+        <LuSigma size={14} />
+      </ToolbarBtn>
+      <ToolbarBtn onClick={addDisplayMath} title="Insert Display Math ($$…$$)">
+        <span className="text-[10px] font-mono font-bold leading-none">$$</span>
       </ToolbarBtn>
 
       <ToolbarSep />

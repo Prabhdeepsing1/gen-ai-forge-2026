@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from database import engine, Base
+from database import engine, Base, SessionLocal
 import models  # ensure all models are registered before create_all
 from routers import (
     auth_router,
@@ -18,7 +18,9 @@ from routers import (
     ai_tools_router,
     upload_router,
     semantic_search_router,
+    build_paper_router,
 )
+from utils.vector_store import sync_papers_from_db
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -30,6 +32,16 @@ async def lifespan(app: FastAPI):
         print("✅ Database tables created / verified")
     except Exception as e:
         print(f"⚠️  Database connection failed (will retry on first request): {e}")
+
+    # Sync existing papers into FAISS vector store
+    try:
+        db = SessionLocal()
+        count = sync_papers_from_db(db)
+        db.close()
+        print(f"✅ FAISS vector store synced – {count} papers indexed")
+    except Exception as e:
+        print(f"⚠️  FAISS sync skipped: {e}")
+
     yield
     # Shutdown: nothing needed
 
@@ -63,6 +75,7 @@ app.include_router(chat_router)
 app.include_router(ai_tools_router)
 app.include_router(upload_router)
 app.include_router(semantic_search_router)
+app.include_router(build_paper_router)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

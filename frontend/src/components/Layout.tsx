@@ -8,12 +8,14 @@ import {
   HiOutlineLogout,
   HiOutlineMenu,
   HiOutlineX,
+  HiOutlineSparkles,
 } from "react-icons/hi";
 
 const navItems = [
   { label: "Workspaces", path: "/dashboard", icon: HiOutlineViewGrid },
   { label: "Papers", path: "/papers", icon: HiOutlineDocumentText },
   { label: "Documents", path: "/documents", icon: HiOutlineUpload },
+  { label: "Build Paper", path: "/build-paper", icon: HiOutlineSparkles },
 ];
 
 export function Layout() {

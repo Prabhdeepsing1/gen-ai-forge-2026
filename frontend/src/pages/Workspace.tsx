@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, type FormEvent } from "react";
+import { useEffect, useState, useRef, useCallback, type FormEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { workspacesAPI, papersAPI, chatAPI, aiAPI, semanticSearchAPI } from "../api";
 import type { WorkspaceDetail, Paper, ChatMessage, SemanticSearchResult, AnalysisResult } from "../types";
@@ -8,6 +8,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { WordEditor } from "../components/editor/WordEditor";
+import type { WordEditorHandle } from "../components/editor/WordEditor";
 import {
   HiOutlineSearch,
   HiOutlineTrash,
@@ -23,14 +24,19 @@ import {
   HiOutlineClock,
   HiOutlineCollection,
   HiOutlinePencilAlt,
+  HiOutlineClipboardCopy,
+  HiOutlineCheck,
+  HiOutlineChevronDown,
 } from "react-icons/hi";
 
 type Tab = "papers" | "chat" | "ai" | "search" | "history";
 
 export function PaperCard({ paper, onDelete }: { paper: Paper; onDelete?: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+
   return (
-    <div className="group bg-[#111118] border border-zinc-800 rounded-xl p-5 hover:border-zinc-600 transition-all">
-      <div className="flex items-start gap-3">
+    <div className="group bg-[#111118] border border-zinc-800 rounded-xl hover:border-zinc-600 transition-all">
+      <div className="flex items-start gap-3 p-5 pb-3">
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-zinc-100 leading-snug">
             {paper.title}
@@ -40,17 +46,13 @@ export function PaperCard({ paper, onDelete }: { paper: Paper; onDelete?: () => 
             {(paper.authors?.length ?? 0) > 4 && " et al."}
             {paper.published && ` · ${paper.published}`}
           </p>
-          {paper.abstract && (
-            <p className="text-sm text-zinc-500 mt-2 line-clamp-2 leading-relaxed">
-              {paper.abstract}
-            </p>
-          )}
-          <div className="flex items-center gap-3 mt-3">
+          <div className="flex items-center gap-3 mt-2.5">
             {paper.url && (
               <a
                 href={paper.url}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
                 className="text-zinc-500 hover:text-indigo-400 transition-colors"
                 title="View on arXiv"
               >
@@ -62,6 +64,7 @@ export function PaperCard({ paper, onDelete }: { paper: Paper; onDelete?: () => 
                 href={paper.pdf_url}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
                 className="text-zinc-500 hover:text-indigo-400 transition-colors"
                 title="View PDF"
               >
@@ -80,8 +83,124 @@ export function PaperCard({ paper, onDelete }: { paper: Paper; onDelete?: () => 
           </button>
         )}
       </div>
+
+      {/* Abstract dropdown toggle */}
+      {paper.abstract && (
+        <>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="w-full flex items-center gap-1.5 px-5 py-2 text-[11px] font-medium text-zinc-500 hover:text-zinc-300 border-t border-zinc-800/60 transition-colors"
+          >
+            <HiOutlineChevronDown
+              size={13}
+              className={`transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+            />
+            {expanded ? "Hide abstract" : "Show abstract"}
+          </button>
+
+          <div
+            className={`overflow-hidden transition-all duration-300 ease-in-out ${
+              expanded ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0"
+            }`}
+          >
+            <div className="px-5 pb-4 pt-1">
+              <p className="text-sm text-zinc-400 leading-relaxed">
+                {paper.abstract}
+              </p>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
+}
+
+function SearchResultCard({ paper, onImport }: { paper: Paper; onImport: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="border border-zinc-800 rounded-lg hover:border-zinc-700 transition-colors">
+      <div className="flex items-start justify-between gap-2 p-3 pb-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-zinc-200 leading-snug">
+            {paper.title}
+          </p>
+          <p className="text-xs text-zinc-500 mt-1 truncate">
+            {paper.authors?.slice(0, 3).join(", ")}
+            {(paper.authors?.length ?? 0) > 3 && " et al."}
+            {paper.published && ` · ${paper.published}`}
+          </p>
+        </div>
+        <button
+          onClick={onImport}
+          className="shrink-0 text-zinc-500 hover:text-indigo-400 transition-colors"
+          title="Import paper"
+        >
+          <HiOutlinePlus size={18} />
+        </button>
+      </div>
+
+      {paper.abstract && (
+        <>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium text-zinc-500 hover:text-zinc-300 border-t border-zinc-800/50 transition-colors"
+          >
+            <HiOutlineChevronDown
+              size={11}
+              className={`transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+            />
+            {expanded ? "Hide abstract" : "Show abstract"}
+          </button>
+
+          <div
+            className={`overflow-hidden transition-all duration-300 ease-in-out ${
+              expanded ? "max-h-[300px] opacity-100" : "max-h-0 opacity-0"
+            }`}
+          >
+            <div className="px-3 pb-3 pt-0.5">
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                {paper.abstract}
+              </p>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Markdown → HTML converter for applying to editor ─────────────────
+function markdownToHtml(md: string): string {
+  let html = md;
+  // Headings (### → <h3>, ## → <h2>, # → <h1>)
+  html = html.replace(/^#### (.+)$/gm, "<h4>$1</h4>");
+  html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
+  html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
+  html = html.replace(/^# (.+)$/gm, "<h1>$1</h1>");
+  // Bold + Italic
+  html = html.replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>");
+  // Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  // Italic
+  html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+  // Unordered list items
+  html = html.replace(/^[-*] (.+)$/gm, "<li>$1</li>");
+  // Ordered list items
+  html = html.replace(/^\d+\. (.+)$/gm, "<li>$1</li>");
+  // Wrap consecutive <li> in <ul> (simple approach)
+  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, "<ul>$1</ul>");
+  // Blockquote
+  html = html.replace(/^> (.+)$/gm, "<blockquote><p>$1</p></blockquote>");
+  // Horizontal rule
+  html = html.replace(/^---$/gm, "<hr>");
+  // Paragraphs: lines that aren't already wrapped in tags
+  html = html.replace(/^(?!<[a-z])((?!<\/)[^\n]+)$/gm, "<p>$1</p>");
+  // Clean up empty paragraphs
+  html = html.replace(/<p>\s*<\/p>/g, "");
+  return html;
 }
 
 export default function WorkspacePage() {
@@ -121,6 +240,33 @@ export default function WorkspacePage() {
   const [expandedResult, setExpandedResult] = useState<number | null>(null);
   // ── Editor panel ───────────────────────────────────────────
   const [editorOpen, setEditorOpen] = useState(false);
+  const editorRef = useRef<WordEditorHandle>(null);
+
+  // ── Apply content to editor at cursor position ─────────────
+  const handleApplyToEditor = useCallback((markdown: string) => {
+    const html = markdownToHtml(markdown);
+    if (!editorOpen) {
+      setEditorOpen(true);
+      // Editor needs a frame to mount — apply after it renders
+      setTimeout(() => {
+        editorRef.current?.insertContentAtCursor(html);
+        toast.success("Applied to editor");
+      }, 300);
+    } else {
+      editorRef.current?.insertContentAtCursor(html);
+      toast.success("Applied to editor at cursor position");
+    }
+  }, [editorOpen]);
+
+  const handleCopyToClipboard = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Copied to clipboard");
+    } catch {
+      toast.error("Failed to copy");
+    }
+  }, []);
+
   // ── Fetch workspace ────────────────────────────────────────────
   const fetchWorkspace = async () => {
     try {
@@ -339,32 +485,9 @@ export default function WorkspacePage() {
               </form>
 
               {searchResults.length > 0 && (
-                <div className="space-y-2 max-h-80 overflow-y-auto">
+                <div className="space-y-2 max-h-96 overflow-y-auto">
                   {searchResults.map((p, i) => (
-                    <div
-                      key={p.external_id ?? i}
-                      className="border border-zinc-800 rounded-lg p-3 hover:border-zinc-700 transition-colors"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-zinc-200 leading-snug">
-                            {p.title}
-                          </p>
-                          <p className="text-xs text-zinc-500 mt-1 truncate">
-                            {p.authors?.slice(0, 3).join(", ")}
-                            {(p.authors?.length ?? 0) > 3 && " et al."}
-                            {p.published && ` · ${p.published}`}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => handleImport(p)}
-                          className="shrink-0 text-zinc-500 hover:text-indigo-400 transition-colors"
-                          title="Import paper"
-                        >
-                          <HiOutlinePlus size={18} />
-                        </button>
-                      </div>
-                    </div>
+                    <SearchResultCard key={p.external_id ?? i} paper={p} onImport={() => handleImport(p)} />
                   ))}
                 </div>
               )}
@@ -473,6 +596,27 @@ export default function WorkspacePage() {
                   <div className="prose-md">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
                   </div>
+                  {/* Apply / Copy buttons for assistant messages */}
+                  {m.role === "assistant" && (
+                    <div className="flex items-center gap-1.5 mt-2.5 pt-2 border-t border-zinc-700/50">
+                      <button
+                        onClick={() => handleApplyToEditor(m.content)}
+                        className="flex items-center gap-1 text-[11px] font-medium text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 px-2.5 py-1 rounded-md transition-all"
+                        title="Insert into editor at cursor position"
+                      >
+                        <HiOutlinePencilAlt size={12} />
+                        Apply to Editor
+                      </button>
+                      <button
+                        onClick={() => handleCopyToClipboard(m.content)}
+                        className="flex items-center gap-1 text-[11px] font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-700/30 hover:bg-zinc-700/50 px-2.5 py-1 rounded-md transition-all"
+                        title="Copy response to clipboard"
+                      >
+                        <HiOutlineClipboardCopy size={12} />
+                        Copy
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -572,9 +716,29 @@ export default function WorkspacePage() {
 
           {aiResult && !aiLoading && (
             <div className="bg-[#111118] border border-zinc-800 rounded-xl p-6">
-              <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
-                {aiTool}
-              </h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                  {aiTool}
+                </h3>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => handleApplyToEditor(aiResult)}
+                    className="flex items-center gap-1 text-[11px] font-medium text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 px-2.5 py-1 rounded-md transition-all"
+                    title="Insert into editor at cursor position"
+                  >
+                    <HiOutlinePencilAlt size={12} />
+                    Apply to Editor
+                  </button>
+                  <button
+                    onClick={() => handleCopyToClipboard(aiResult)}
+                    className="flex items-center gap-1 text-[11px] font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-700/30 hover:bg-zinc-700/50 px-2.5 py-1 rounded-md transition-all"
+                    title="Copy to clipboard"
+                  >
+                    <HiOutlineClipboardCopy size={12} />
+                    Copy
+                  </button>
+                </div>
+              </div>
               <div className="prose-md text-sm text-zinc-300 leading-relaxed">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{aiResult}</ReactMarkdown>
               </div>
@@ -790,7 +954,7 @@ export default function WorkspacePage() {
           <PanelResizeHandle className="w-1.5 mx-1 rounded-full bg-zinc-800 hover:bg-indigo-500/40 transition-colors cursor-col-resize" />
           <Panel defaultSize={50} minSize={30}>
             <div className="h-full">
-              <WordEditor workspaceId={workspaceId} workspaceName={workspace.name} />
+              <WordEditor ref={editorRef} workspaceId={workspaceId} workspaceName={workspace.name} />
             </div>
           </Panel>
         </PanelGroup>

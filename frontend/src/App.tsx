@@ -2,6 +2,7 @@ import { Toaster } from "react-hot-toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { BuildPaperProvider } from "@/contexts/BuildPaperContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { Layout } from "@/components/Layout";
 import Login from "./pages/Login";
@@ -10,6 +11,7 @@ import Dashboard from "./pages/Dashboard";
 import WorkspacePage from "./pages/Workspace";
 import Papers from "./pages/Papers";
 import Documents from "./pages/Documents";
+import BuildPaper from "./pages/BuildPaper";
 
 const App = () => (
   <AuthProvider>
@@ -32,7 +34,9 @@ const App = () => (
           <Route
             element={
               <ProtectedRoute>
-                <Layout />
+                <BuildPaperProvider>
+                  <Layout />
+                </BuildPaperProvider>
               </ProtectedRoute>
             }
           >
@@ -40,6 +44,7 @@ const App = () => (
             <Route path="/workspace/:id" element={<WorkspacePage />} />
             <Route path="/papers" element={<Papers />} />
             <Route path="/documents" element={<Documents />} />
+            <Route path="/build-paper" element={<BuildPaper />} />
           </Route>
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

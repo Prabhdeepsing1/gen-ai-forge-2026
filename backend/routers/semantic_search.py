@@ -1,7 +1,7 @@
 # backend/routers/semantic_search.py
 """
 Semantic (vector) search within workspace papers.
-Uses sentence-transformer embeddings + cosine similarity.
+Uses ChromaDB for efficient approximate nearest-neighbour search.
 """
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -9,9 +9,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import User, Workspace, PaperEmbedding, Paper, WorkspacePaper
+from models import User, Workspace, Paper, WorkspacePaper
 from utils.auth import get_current_user
-from utils.embeddings import generate_embedding, embedding_from_bytes, cosine_similarity
+from utils.vector_store import search_papers as vs_search
 
 router = APIRouter(prefix="/semantic-search", tags=["Semantic Search"])
 
@@ -51,35 +51,34 @@ def semantic_search_in_workspace(
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
-    # Fetch papers with embeddings in this workspace
-    rows = (
-        db.query(Paper, PaperEmbedding)
-        .join(WorkspacePaper, WorkspacePaper.paper_id == Paper.id)
-        .join(PaperEmbedding, PaperEmbedding.paper_id == Paper.id)
+    # Get paper IDs that belong to this workspace
+    paper_ids = [
+        row.paper_id
+        for row in db.query(WorkspacePaper.paper_id)
         .filter(WorkspacePaper.workspace_id == workspace_id)
         .all()
-    )
+    ]
 
-    if not rows:
+    if not paper_ids:
         return {"results": [], "query": payload.query}
 
-    # Generate query embedding
-    query_emb = embedding_from_bytes(generate_embedding(payload.query))
+    # Query ChromaDB for nearest neighbours
+    vs_results = vs_search(
+        query=payload.query,
+        paper_ids=paper_ids,
+        top_k=payload.top_k,
+    )
 
-    # Calculate similarity for each paper
-    scored: list[dict] = []
-    for paper, pe in rows:
-        paper_emb = embedding_from_bytes(pe.embedding)
-        sim = cosine_similarity(query_emb, paper_emb)
-        scored.append({
-            "paper_id": paper.id,
-            "title": paper.title,
-            "abstract": paper.abstract,
-            "similarity": round(sim, 4),
-        })
+    # Enrich results with full paper data from SQL
+    enriched: list[dict] = []
+    for hit in vs_results:
+        paper = db.query(Paper).filter(Paper.id == hit["paper_id"]).first()
+        if paper:
+            enriched.append({
+                "paper_id": paper.id,
+                "title": paper.title,
+                "abstract": paper.abstract,
+                "similarity": hit["similarity"],
+            })
 
-    # Sort descending and take top_k
-    scored.sort(key=lambda x: x["similarity"], reverse=True)
-    results = scored[: payload.top_k]
-
-    return {"results": results, "query": payload.query}
+    return {"results": enriched, "query": payload.query}

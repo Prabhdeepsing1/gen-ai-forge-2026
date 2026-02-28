@@ -75,6 +75,69 @@ export const papersAPI = {
     api.post("/papers/import", paper).then((r) => r.data),
   my: () => api.get<{ papers: Paper[] }>("/papers/my").then((r) => r.data.papers),
   delete: (id: number) => api.delete(`/papers/${id}`).then((r) => r.data),
+  chatStream: async (
+    paper: { title: string; abstract?: string | null; authors?: string[] | null },
+    message: string,
+    history: { role: string; content: string }[] = [],
+    onToken: (token: string) => void,
+    onDone: () => void,
+    onError: (err: string) => void,
+  ) => {
+    const token = localStorage.getItem("token");
+    const res = await fetch("http://127.0.0.1:8000/papers/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        title: paper.title,
+        abstract: paper.abstract ?? "",
+        authors: paper.authors ?? [],
+        message,
+        history,
+      }),
+    });
+
+    if (!res.ok || !res.body) {
+      onError("Failed to connect");
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data: ")) continue;
+        const payload = trimmed.slice(6);
+        if (payload === "[DONE]") {
+          onDone();
+          return;
+        }
+        try {
+          const parsed = JSON.parse(payload);
+          if (parsed.error) {
+            onError(parsed.error);
+            return;
+          }
+          if (parsed.token) onToken(parsed.token);
+        } catch {
+          // skip malformed chunks
+        }
+      }
+    }
+    onDone();
+  },
 };
 
 export const chatAPI = {
@@ -110,4 +173,69 @@ export const uploadAPI = {
   list: () => api.get<{ documents: UploadedDocument[] }>("/upload/documents").then((r) => r.data.documents),
   get: (id: number) => api.get<UploadedDocument>(`/upload/documents/${id}`).then((r) => r.data),
   delete: (id: number) => api.delete(`/upload/documents/${id}`).then((r) => r.data),
+};
+
+export const buildPaperAPI = {
+  refineQuery: (userTopic: string) =>
+    api.post<{ original: string; refined_query: string }>("/build-paper/refine-query", { user_topic: userTopic }).then((r) => r.data),
+
+  searchArxiv: (query: string, maxResults = 20) =>
+    api.get<{ papers: Paper[]; total: number; query: string }>(`/build-paper/search?query=${encodeURIComponent(query)}&max_results=${maxResults}`).then((r) => r.data),
+
+  generatePaper: async (
+    topic: string,
+    papers: { title: string; authors?: string[] | null; abstract?: string | null; published?: string | null; url?: string | null }[],
+    onSection: (section: string) => void,
+    onContent: (html: string) => void,
+    onDone: () => void,
+    onError: (msg: string) => void,
+    onPlan?: (text: string) => void,
+    onReasoning?: (text: string) => void,
+  ) => {
+    const token = localStorage.getItem("token");
+    const res = await fetch("http://127.0.0.1:8000/build-paper/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ topic, papers }),
+    });
+
+    if (!res.ok || !res.body) {
+      onError("Failed to connect to paper generation service");
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data: ")) continue;
+        const payload = trimmed.slice(6);
+        try {
+          const parsed = JSON.parse(payload);
+          if (parsed.type === "section") onSection(parsed.section);
+          else if (parsed.type === "content") onContent(parsed.html);
+          else if (parsed.type === "plan") onPlan?.(parsed.text);
+          else if (parsed.type === "reasoning") onReasoning?.(parsed.text);
+          else if (parsed.type === "done") { onDone(); return; }
+          else if (parsed.type === "error") { onError(parsed.message); return; }
+        } catch {
+          // skip malformed chunks
+        }
+      }
+    }
+    onDone();
+  },
 };

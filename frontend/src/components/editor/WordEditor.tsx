@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useImperativeHandle, forwardRef } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
+import type { Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
@@ -16,11 +17,18 @@ import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import Subscript from "@tiptap/extension-subscript";
 import Superscript from "@tiptap/extension-superscript";
+import { MathInline, MathDisplay } from "./latex-extension";
 import { EditorToolbar } from "./EditorToolbar";
+import "katex/dist/katex.min.css";
 
 interface WordEditorProps {
   workspaceId: number;
   workspaceName?: string;
+}
+
+export interface WordEditorHandle {
+  getEditor: () => Editor | null;
+  insertContentAtCursor: (html: string) => void;
 }
 
 const STORAGE_KEY_PREFIX = "researchhub-editor-";
@@ -35,7 +43,8 @@ function getDocTitleKey(workspaceId: number) {
 
 const DEFAULT_CONTENT = `<h1>Untitled Document</h1><p>Start writing your research paper here...</p>`;
 
-export function WordEditor({ workspaceId, workspaceName }: WordEditorProps) {
+export const WordEditor = forwardRef<WordEditorHandle, WordEditorProps>(
+  function WordEditor({ workspaceId, workspaceName }, ref) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
@@ -67,6 +76,8 @@ export function WordEditor({ workspaceId, workspaceName }: WordEditorProps) {
       TaskItem.configure({ nested: true }),
       Subscript,
       Superscript,
+      MathInline,
+      MathDisplay,
     ],
     content: savedContent,
     editorProps: {
@@ -83,6 +94,17 @@ export function WordEditor({ workspaceId, workspaceName }: WordEditorProps) {
       }, 500);
     },
   });
+
+  // Expose editor instance to parent via ref
+  useImperativeHandle(ref, () => ({
+    getEditor: () => editor,
+    insertContentAtCursor: (html: string) => {
+      if (!editor) return;
+      editor.chain().focus().insertContent(html).run();
+      // Trigger auto-save after insertion
+      localStorage.setItem(getStorageKey(workspaceId), editor.getHTML());
+    },
+  }), [editor, workspaceId]);
 
   // Save title to localStorage
   const handleTitleChange = useCallback(
@@ -124,7 +146,9 @@ export function WordEditor({ workspaceId, workspaceName }: WordEditorProps) {
     mark { background: #fef08a; padding: 0 2px; }
     ul[data-type="taskList"] { list-style: none; padding-left: 0; }
     ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 8px; }
+    .math-display-node { text-align: center; margin: 1em 0; }
   </style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css">
 </head>
 <body>
 ${editor.getHTML()}
@@ -204,4 +228,4 @@ ${editor.getHTML()}
       </div>
     </div>
   );
-}
+});

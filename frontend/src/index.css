@@ -460,3 +460,21 @@
 .editor-scroll::-webkit-scrollbar-track { background: transparent; }
 .editor-scroll::-webkit-scrollbar-thumb { background: hsl(240 4% 18%); border-radius: 3px; }
 .editor-scroll::-webkit-scrollbar-thumb:hover { background: hsl(240 4% 28%); }
+
+/* ── KaTeX / LaTeX math nodes ───────────────────────────────────────── */
+.tiptap .math-inline-node {
+  display: inline;
+}
+.tiptap .math-display-node {
+  text-align: center;
+  margin: 1em 0;
+}
+.tiptap .katex {
+  font-size: 1.08em;
+}
+.tiptap .katex-display {
+  margin: 0.5em 0;
+}
+.tiptap .katex-display > .katex {
+  font-size: 1.15em;
+}
