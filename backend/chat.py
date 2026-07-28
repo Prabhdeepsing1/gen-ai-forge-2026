@@ -62,17 +62,52 @@ def _get_conversation_history(workspace_id: int, db: Session, limit: int = 10) -
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/")
-def chat_with_papers(
+async def chat_with_papers(
     message: ChatMessage,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    papers = _get_workspace_papers(message.workspace_id, current_user.id, db)
+    # Verify ownership
+    ws = db.query(Workspace).filter(
+        Workspace.id == message.workspace_id,
+        Workspace.user_id == current_user.id,
+    ).first()
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+        
     history = _get_conversation_history(message.workspace_id, db)
-    context = research_assistant.create_research_context(papers, message.content)
-    ai_reply = research_assistant.generate_research_response(
-        context, message.content, conversation_history=history
-    )
+    
+    from agents.graph import compile_graph
+    from langchain_core.messages import HumanMessage, AIMessage
+    
+    # Load past messages into LangChain format
+    lc_messages = []
+    for msg in history:
+        if msg["role"] == "user":
+            lc_messages.append(HumanMessage(content=msg["content"]))
+        else:
+            lc_messages.append(AIMessage(content=msg["content"]))
+    lc_messages.append(HumanMessage(content=message.content))
+    
+    initial_state = {
+        "session_id": f"session_{message.workspace_id}_{current_user.id}",
+        "workspace_id": message.workspace_id,
+        "user_id": current_user.id,
+        "messages": lc_messages,
+        "conversation_history": history,
+        "critique_iteration_count": 0,
+        "tool_results": [],
+    }
+    
+    # Compile graph and invoke
+    graph = await compile_graph()
+    config = {"configurable": {"thread_id": initial_state["session_id"]}}
+    
+    try:
+        final_state = await graph.ainvoke(initial_state, config=config)
+        ai_reply = final_state.get("final_response", "Sorry, I couldn't process that.")
+    except Exception as e:
+        ai_reply = f"Agent encountered an error: {str(e)}"
 
     # Persist both turns
     db.add(Conversation(workspace_id=message.workspace_id, role="user",      content=message.content))

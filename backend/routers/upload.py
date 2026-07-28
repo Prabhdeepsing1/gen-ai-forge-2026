@@ -44,8 +44,23 @@ async def upload_pdf(
     if not text.strip():
         raise HTTPException(status_code=400, detail="No extractable text in PDF")
 
-    # Generate AI summary
-    summary = research_assistant.summarize_pdf_text(text, file.filename)
+    # Generate AI summary using local model
+    from langchain_ollama import ChatOllama
+    from langchain_core.messages import HumanMessage
+    
+    llm = ChatOllama(
+        model="qwen3:8b",
+        base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        temperature=0.3,
+        extra_body={"enable_thinking": False}
+    )
+    
+    prompt = f"Summarize the following document titled '{file.filename}'. Highlight the main topic, methodology, and key findings:\n\n{text[:10000]}"
+    try:
+        resp = llm.invoke([HumanMessage(content=prompt)])
+        summary = resp.content
+    except Exception as e:
+        summary = f"Summary generation failed: {str(e)}"
 
     # Persist as UploadedDocument
     doc = UploadedDocument(

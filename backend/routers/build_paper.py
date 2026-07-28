@@ -106,17 +106,13 @@ def refine_query(
 ):
     """Use LLM to turn a rough topic into an optimized arXiv search query."""
     try:
-        resp = groq_client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": REFINE_SYSTEM},
-                {"role": "user", "content": payload.user_topic},
-            ],
-            model=MODEL_CONFIG["model"],
-            temperature=0.3,
-            max_tokens=60,
-            top_p=1,
-        )
-        refined = resp.choices[0].message.content.strip().strip('"').strip("'")
+        from langchain_core.messages import HumanMessage, SystemMessage
+        
+        resp = llm.invoke([
+            SystemMessage(content=REFINE_SYSTEM),
+            HumanMessage(content=payload.user_topic)
+        ])
+        refined = resp.content.strip().strip('"').strip("'")
         return {"original": payload.user_topic, "refined_query": refined}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM query refinement failed: {e}")
@@ -306,32 +302,41 @@ SECTION_PROMPTS = {
 }
 
 
-def _stream_llm(messages: list, max_tokens: int = 4096):
-    """Helper: stream Groq completion, yielding content tokens."""
-    stream = groq_client.chat.completions.create(
-        messages=messages,
-        model=MODEL_CONFIG["model"],
-        temperature=0.7,
-        max_tokens=max_tokens,
-        top_p=1,
-        stream=True,
-    )
-    for chunk in stream:
-        delta = chunk.choices[0].delta
-        if delta and delta.content:
-            yield delta.content
+import os
+from langchain_ollama import ChatOllama
+from langchain_core.messages import HumanMessage, SystemMessage
 
+llm = ChatOllama(
+    model="qwen3:8b",
+    base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+    temperature=0.7,
+    extra_body={"enable_thinking": False}
+)
+
+def _stream_llm(messages: list, max_tokens: int = 4096):
+    """Helper: stream completion using ChatOllama, yielding content tokens."""
+    lc_messages = []
+    for m in messages:
+        if m["role"] == "system":
+            lc_messages.append(SystemMessage(content=m["content"]))
+        else:
+            lc_messages.append(HumanMessage(content=m["content"]))
+            
+    for chunk in llm.stream(lc_messages):
+        if chunk.content:
+            yield chunk.content
 
 def _collect_llm(messages: list, max_tokens: int = 4096) -> str:
-    """Helper: get a full completion (non-streaming) from Groq."""
-    resp = groq_client.chat.completions.create(
-        messages=messages,
-        model=MODEL_CONFIG["model"],
-        temperature=0.7,
-        max_tokens=max_tokens,
-        top_p=1,
-    )
-    return resp.choices[0].message.content or ""
+    """Helper: get a full completion from ChatOllama."""
+    lc_messages = []
+    for m in messages:
+        if m["role"] == "system":
+            lc_messages.append(SystemMessage(content=m["content"]))
+        else:
+            lc_messages.append(HumanMessage(content=m["content"]))
+            
+    resp = llm.invoke(lc_messages)
+    return resp.content or ""
 
 
 @router.post("/generate")

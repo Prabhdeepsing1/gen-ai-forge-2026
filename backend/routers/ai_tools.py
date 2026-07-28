@@ -53,8 +53,32 @@ def _get_papers_for_workspace(workspace_id: int, user_id: int, db: Session) -> t
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+async def _invoke_insight_agent(workspace_id: int, user_id: int, instruction: str) -> str:
+    from agents.graph import compile_graph
+    from langchain_core.messages import HumanMessage
+    
+    initial_state = {
+        "session_id": f"ai_tools_{workspace_id}_{user_id}",
+        "workspace_id": workspace_id,
+        "user_id": user_id,
+        "messages": [HumanMessage(content=instruction)],
+        "conversation_history": [],
+        "critique_iteration_count": 0,
+        "tool_results": [],
+    }
+    
+    graph = await compile_graph()
+    config = {"configurable": {"thread_id": initial_state["session_id"]}}
+    
+    try:
+        final_state = await graph.ainvoke(initial_state, config=config)
+        return final_state.get("final_response", "Failed to generate analysis.")
+    except Exception as e:
+        return f"Agent encountered an error: {str(e)}"
+
+
 @router.post("/summarize")
-def summarize_papers(
+async def summarize_papers(
     payload: SummarizeRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -64,7 +88,7 @@ def summarize_papers(
     if not papers:
         raise HTTPException(status_code=400, detail="No papers in workspace")
 
-    summary = research_assistant.generate_summary(papers)
+    summary = await _invoke_insight_agent(payload.workspace_id, current_user.id, "Generate summaries for all papers in the workspace.")
 
     # Persist analysis result
     ar = AnalysisResult(
@@ -80,7 +104,7 @@ def summarize_papers(
 
 
 @router.post("/insights")
-def extract_insights(
+async def extract_insights(
     payload: InsightsRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -90,7 +114,7 @@ def extract_insights(
     if not papers:
         raise HTTPException(status_code=400, detail="No papers in workspace")
 
-    insights = research_assistant.extract_key_insights(papers)
+    insights = await _invoke_insight_agent(payload.workspace_id, current_user.id, "Extract key insights and trends from the workspace papers.")
 
     # Persist analysis result
     ar = AnalysisResult(
@@ -106,7 +130,7 @@ def extract_insights(
 
 
 @router.post("/literature-review")
-def generate_lit_review(
+async def generate_lit_review(
     payload: LitReviewRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -116,7 +140,7 @@ def generate_lit_review(
     if not papers:
         raise HTTPException(status_code=400, detail="No papers in workspace")
 
-    review = research_assistant.generate_literature_review(papers)
+    review = await _invoke_insight_agent(payload.workspace_id, current_user.id, "Generate a formal literature review from the workspace papers.")
 
     # Persist analysis result
     ar = AnalysisResult(
@@ -129,6 +153,7 @@ def generate_lit_review(
     db.commit()
 
     return {"literature_review": review, "paper_count": len(papers)}
+
 
 
 # ── Analysis History ──────────────────────────────────────────────────────────

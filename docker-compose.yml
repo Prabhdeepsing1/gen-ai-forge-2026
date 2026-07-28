@@ -1,0 +1,58 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: dbname
+    ports:
+      - "5432:5432" # Mapped for host access during dev
+    networks:
+      - ai_network
+
+  backend: # FastAPI + LangGraph Agents
+    build: ./backend
+    environment:
+      - DATABASE_URL=postgresql://user:pass@postgres:5432/dbname
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - MCP_ARXIV_URL=http://arxiv-server:8000/sse
+      - MCP_KB_URL=http://knowledge-base-server:8000/sse
+      - MCP_DOC_URL=http://document-server:8000/sse
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    ports:
+      - "8000:8000"
+    networks:
+      - ai_network
+    depends_on:
+      - postgres
+      - arxiv-server
+      - knowledge-base-server
+      - document-server
+
+  arxiv-server:
+    build: ./backend
+    command: ["uvicorn", "mcp_servers.arxiv_server.server:app", "--host", "0.0.0.0", "--port", "8000"]
+    networks:
+      - ai_network
+
+  knowledge-base-server:
+    build: ./backend
+    command: ["uvicorn", "mcp_servers.knowledge_base_server.server:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      - DATABASE_URL=postgresql://user:pass@postgres:5432/dbname
+    networks:
+      - ai_network
+    depends_on:
+      - postgres
+
+  document-server:
+    build: ./backend
+    command: ["uvicorn", "mcp_servers.document_server.server:app", "--host", "0.0.0.0", "--port", "8000"]
+    networks:
+      - ai_network
+
+networks:
+  ai_network:
+    driver: bridge
